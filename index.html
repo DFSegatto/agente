@@ -3,18 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <title>SiteHunter Free</title>
-
-  <!-- Biblioteca Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 
 <body>
 
-<h2>Buscar empresas sem site</h2>
+<h2>Buscar até 20 empresas sem site</h2>
 
 <input id="cidade" placeholder="Cidade">
 <input id="estado" placeholder="Estado">
 <button onclick="buscarEmpresas()">Buscar</button>
+
+<p id="status"></p>
 
 <h3>Resultados</h3>
 <ul id="lista"></ul>
@@ -23,7 +23,6 @@
 const SUPABASE_URL = "https://evefnjpjxqxydknyjutt.supabase.co"
 const SUPABASE_KEY = "sb_publishable_Ou4ChPNEA1mYc6ESE2UsEQ_EZZ4nyE7"
 
-// nome diferente para não conflitar
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
 
 async function buscarEmpresas() {
@@ -31,44 +30,73 @@ async function buscarEmpresas() {
   const cidade = document.getElementById("cidade").value
   const estado = document.getElementById("estado").value
 
+  document.getElementById("status").innerText = "Buscando empresas..."
+
   const query = `
-  [out:json];
+  [out:json][timeout:25];
   area["name"="${cidade}"]->.searchArea;
   (
     node["shop"](area.searchArea);
     node["amenity"](area.searchArea);
   );
-  out tags;
+  out tags 20;
   `;
 
-  const res = await fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    body: query
-  });
+  try {
 
-  const data = await res.json();
+    const res = await fetch("https://overpass.kumi.systems/api/interpreter", {
+      method: "POST",
+      body: query
+    });
 
-  const semSite = data.elements.filter(e => !e.tags.website);
-
-  const lista = document.getElementById("lista");
-  lista.innerHTML = "";
-
-  for (const e of semSite) {
-
-    const lead = {
-      nome: e.tags.name || "",
-      cidade: cidade,
-      estado: estado,
-      telefone: e.tags.phone || "",
-      endereco: e.tags["addr:street"] || "",
-      categoria: e.tags.shop || e.tags.amenity || "",
-      website: "",
-      status: "sem_site"
+    if (!res.ok) {
+      document.getElementById("status").innerText =
+        "Servidor ocupado. Aguarde 1 minuto e tente novamente.";
+      return;
     }
 
-    await sb.from("leads").insert(lead)
+    const data = await res.json();
 
-    lista.innerHTML += `<li>${lead.nome} — ${lead.telefone}</li>`
+    const semSite = data.elements.filter(e => !e.tags.website);
+
+    const lista = document.getElementById("lista");
+    lista.innerHTML = "";
+
+    for (const e of semSite) {
+
+      const lead = {
+        nome: e.tags.name || "Sem nome",
+        cidade: cidade,
+        estado: estado,
+        telefone: e.tags.phone || "",
+        endereco: e.tags["addr:street"] || "",
+        categoria: e.tags.shop || e.tags.amenity || "",
+        website: "",
+        status: "sem_site"
+      }
+
+      // salva no Supabase
+      await sb.from("leads").insert(lead)
+
+      lista.innerHTML += `
+        <li>
+          <b>${lead.nome}</b><br>
+          📍 ${lead.endereco}<br>
+          ☎ ${lead.telefone}<br>
+          🏷 ${lead.categoria}
+        </li>
+      `
+    }
+
+    document.getElementById("status").innerText =
+      `Encontradas ${semSite.length} empresas sem site`
+
+  } catch (err) {
+
+    document.getElementById("status").innerText =
+      "Erro ao buscar. Tente novamente."
+
+    console.error(err)
   }
 }
 </script>
