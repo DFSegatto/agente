@@ -33,80 +33,89 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapa);
 
 async function buscar() {
 
-    const cidade = document.getElementById("cidade").value.trim();
-    const estado = document.getElementById("estado").value.trim();
-    const lista = document.getElementById("lista");
+  const cidadeValor = document.getElementById("cidade").value.trim();
+  const estadoValor = document.getElementById("estado").value.trim();
 
-    if (!cidade || !estado) {
-        alert("Digite cidade e estado");
-        return;
-    }
+  const estado = normalizarEstado(estadoValor);
+  const lista = document.getElementById("lista");
 
-    lista.textContent = "Buscando empresas privadas...";
-    empresasGlobal = [];
+  if (!cidadeValor || !estado){
+    alert("Digite cidade e estado");
+    return;
+  }
 
-    const area = `${cidade}, ${estado}, Brazil`;
+  lista.textContent = "Buscando empresas privadas...";
+  empresasGlobal = [];
 
-    const query = `
-    [out:json][timeout:25];
-    area["name"="${area}"]->.searchArea;
+  const query = `
+  [out:json][timeout:25];
 
-    (
-      node["shop"](area.searchArea);
-      node["amenity"~"restaurant|cafe|fast_food|pharmacy|clinic|school|college|bar|pub"](area.searchArea);
-      node["office"](area.searchArea);
-      node["tourism"="hotel"](area.searchArea);
+  area["name"="Brasil"]->.br;
+  area["name"="${estado}"](area.br)->.estado;
+  area["name"="${cidadeValor}"](area.estado)->.cidade;
+
+  (
+    node["shop"](area.cidade);
+    node["amenity"~"restaurant|cafe|fast_food|pharmacy|clinic|bar|pub|school|college"](area.cidade);
+    node["office"](area.cidade);
+    node["tourism"="hotel"](area.cidade);
+  );
+
+  out tags center 20;
+  `;
+
+  try {
+
+    const response = await fetch(
+      "https://overpass-api.de/api/interpreter",
+      { method:"POST", body:query }
     );
 
-    out tags center 20;
-    `;
+    const data = await response.json();
 
-    try {
+    const empresas = data.elements
+      .filter(e => e.tags && e.tags.name)
+      .slice(0,20);
 
-        const response = await fetch(
-            "https://overpass-api.de/api/interpreter",
-            { method: "POST", body: query }
-        );
+    mapa.eachLayer(l => {
+      if (l instanceof L.Marker) mapa.removeLayer(l);
+    });
 
-        const data = await response.json();
-
-        const empresas = data.elements
-            .filter(e => e.tags && e.tags.name)
-            .slice(0, 20);
-
-        mapa.eachLayer(l => {
-            if (l instanceof L.Marker) mapa.removeLayer(l);
-        });
-
-        if (empresas.length === 0) {
-            lista.textContent = "Nenhuma empresa encontrada.";
-            return;
-        }
-
-        empresasGlobal = empresas;
-
-        lista.textContent = empresas.map((e, i) => {
-
-            const tipo = e.tags.shop || e.tags.amenity || e.tags.office || e.tags.tourism || "empresa";
-
-            const lat = e.lat || e.center?.lat;
-            const lon = e.lon || e.center?.lon;
-
-            if (lat && lon) {
-                L.marker([lat, lon])
-                    .addTo(mapa)
-                    .bindPopup(`<b>${e.tags.name}</b><br>${tipo}`);
-            }
-
-            return `${i+1}. ${e.tags.name} — ${tipo}`;
-
-        }).join("\n");
-
-    } catch (erro) {
-        lista.textContent = "Erro na busca.";
-        console.error(erro);
+    if (empresas.length === 0){
+      lista.textContent = "Nenhuma empresa encontrada.";
+      return;
     }
+
+    empresasGlobal = empresas;
+
+    lista.textContent = empresas.map((e,i)=>{
+
+      const tipo =
+        e.tags.shop ||
+        e.tags.amenity ||
+        e.tags.office ||
+        e.tags.tourism ||
+        "empresa";
+
+      const lat = e.lat || e.center?.lat;
+      const lon = e.lon || e.center?.lon;
+
+      if (lat && lon){
+        L.marker([lat, lon])
+          .addTo(mapa)
+          .bindPopup(`<b>${e.tags.name}</b><br>${tipo}`);
+      }
+
+      return `${i+1}. ${e.tags.name} — ${tipo}`;
+
+    }).join("\n");
+
+  } catch (erro){
+    lista.textContent = "Erro na busca.";
+    console.error(erro);
+  }
 }
+
 
 function exportarCSV() {
 
