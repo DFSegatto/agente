@@ -1,3 +1,37 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<title>Modo Caça-Clientes Extremo</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<style>
+body { font-family: Arial; margin: 20px; }
+#mapa { height: 420px; margin-top: 20px; }
+button { margin: 5px; padding: 8px 12px; }
+input { padding: 8px; }
+</style>
+</head>
+<body>
+
+<h2>🚀 MODO CAÇA-CLIENTES EXTREMO</h2>
+
+<input id="cidade" placeholder="Digite a cidade">
+<button onclick="buscar()">Caçar Clientes</button>
+<button onclick="exportarCSV()">Exportar Leads</button>
+
+<pre id="lista"></pre>
+<div id="mapa"></div>
+
+<script>
+
+let empresasGlobal = [];
+
+let mapa = L.map('mapa').setView([-27, -51], 7);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapa);
+
 async function buscar() {
 
   const cidadeValor = document.getElementById("cidade").value.trim();
@@ -10,7 +44,7 @@ async function buscar() {
 
   lista.textContent = "Localizando cidade...";
 
-  // Geocodificar cidade
+  // Geocodificação da cidade
   const geoResp = await fetch(
     `https://nominatim.openstreetmap.org/search?city=${cidadeValor}&country=Brazil&format=json`
   );
@@ -29,7 +63,7 @@ async function buscar() {
   const west = boundingbox[2];
   const east = boundingbox[3];
 
-  lista.textContent = "Caçando clientes EXTREMOS...";
+  lista.textContent = "Caçando clientes quentes...";
 
   const query = `
   [out:json][timeout:25];
@@ -73,7 +107,7 @@ async function buscar() {
     });
 
     if (empresas.length === 0){
-      lista.textContent = "Nenhum cliente extremo encontrado.";
+      lista.textContent = "Nenhum cliente encontrado.";
       return;
     }
 
@@ -84,17 +118,8 @@ async function buscar() {
       const t = e.tags;
 
       const tipo = t.shop || t.amenity || t.office || t.tourism || "empresa";
-
-      const telefone =
-        t.phone ||
-        t["contact:phone"] ||
-        "Não informado";
-
-      const redes =
-        t["contact:instagram"] ||
-        t["contact:facebook"] ||
-        "Sem redes";
-
+      const telefone = t.phone || t["contact:phone"];
+      const redes = t["contact:instagram"] || t["contact:facebook"];
       const endereco =
         (t["addr:street"] || "") + " " + (t["addr:housenumber"] || "");
 
@@ -123,10 +148,43 @@ Redes: ${redes}
 ❌ NÃO POSSUI SITE
 `;
 
-    }).join("\n======================");
+    }).join("\n=====================");
 
   } catch (erro){
     lista.textContent = "Erro na busca.";
     console.error(erro);
   }
 }
+
+function exportarCSV(){
+
+  if (empresasGlobal.length === 0){
+    alert("Nenhum lead para exportar.");
+    return;
+  }
+
+  let csv = "Nome,Tipo,Telefone,Endereco,Redes\n";
+
+  empresasGlobal.forEach(e=>{
+    const t = e.tags;
+
+    const tipo = t.shop || t.amenity || t.office || t.tourism || "empresa";
+    const telefone = t.phone || t["contact:phone"] || "";
+    const redes = t["contact:instagram"] || t["contact:facebook"] || "";
+    const endereco =
+      (t["addr:street"] || "") + " " + (t["addr:housenumber"] || "");
+
+    csv += `"${t.name}","${tipo}","${telefone}","${endereco}","${redes}"\n`;
+  });
+
+  const blob = new Blob([csv], { type:"text/csv" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "leads_extremos.csv";
+  link.click();
+}
+
+</script>
+
+</body>
+</html>
