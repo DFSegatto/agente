@@ -2,63 +2,70 @@
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-<title>Buscar Empresas Privadas</title>
+<title>Buscador PRO de Empresas</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<style>
+body { font-family: Arial; margin: 20px; }
+#mapa { height: 400px; margin-top: 20px; }
+button { margin: 5px; }
+</style>
 </head>
 <body>
 
-<h2>Buscar 20 empresas privadas por cidade</h2>
+<h2>🔎 Buscador PRO de Empresas Privadas</h2>
 
-<input type="text" id="cidade" placeholder="Cidade (ex: Joaçaba)">
-<input type="text" id="estado" placeholder="Estado (SC ou Santa Catarina)">
-<button onclick="buscarEmpresas()">Buscar</button>
+<input id="cidade" placeholder="Cidade">
+<input id="estado" placeholder="Estado (SC ou Santa Catarina)">
+<button onclick="buscar()">Buscar</button>
+<button onclick="exportarCSV()">Exportar Excel</button>
 
-<pre id="resultado"></pre>
+<pre id="lista"></pre>
+<div id="mapa"></div>
 
 <script>
-async function buscarEmpresas() {
+let empresasGlobal = [];
+let mapa = L.map('mapa').setView([-27, -51], 7);
 
-    const cidade = document.getElementById("cidade").value.trim();
-    const estado = document.getElementById("estado").value.trim();
-    const resultado = document.getElementById("resultado");
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapa);
+
+async function buscar() {
+
+    const cidade = cidade.value.trim();
+    const estado = estado.value.trim();
+    const lista = document.getElementById("lista");
 
     if (!cidade || !estado) {
         alert("Digite cidade e estado");
         return;
     }
 
-    resultado.textContent = "Buscando empresas privadas...";
+    lista.textContent = "Buscando empresas privadas...";
+    empresasGlobal = [];
 
     const area = `${cidade}, ${estado}, Brazil`;
 
-    // 🔎 Consulta Overpass — apenas empresas privadas
     const query = `
     [out:json][timeout:25];
     area["name"="${area}"]->.searchArea;
 
     (
       node["shop"](area.searchArea);
-      node["amenity"~"restaurant|cafe|fast_food|pharmacy|clinic|hospital|school|college|university|bar|pub|cinema|theatre|marketplace"](area.searchArea);
+      node["amenity"~"restaurant|cafe|fast_food|pharmacy|clinic|school|college|bar|pub"](area.searchArea);
       node["office"](area.searchArea);
       node["tourism"="hotel"](area.searchArea);
     );
 
-    // ❌ Excluir bancos e órgãos públicos
-    foreach -> .a (
-      if (!t["amenity"] || t["amenity"] != "bank")
-      if (!t["office"] || t["office"] != "government")
-      if (!t["government"])
-      out tags;
-    );
+    out tags center 20;
     `;
 
     try {
 
         const response = await fetch(
             "https://overpass-api.de/api/interpreter",
-            {
-                method: "POST",
-                body: query
-            }
+            { method: "POST", body: query }
         );
 
         const data = await response.json();
@@ -67,19 +74,59 @@ async function buscarEmpresas() {
             .filter(e => e.tags && e.tags.name)
             .slice(0, 20);
 
+        mapa.eachLayer(l => {
+            if (l instanceof L.Marker) mapa.removeLayer(l);
+        });
+
         if (empresas.length === 0) {
-            resultado.textContent = "Nenhuma empresa encontrada.";
+            lista.textContent = "Nenhuma empresa encontrada.";
             return;
         }
 
-        resultado.textContent = empresas.map(e =>
-            `${e.tags.name} — ${e.tags.shop || e.tags.amenity || e.tags.office || e.tags.tourism || "empresa"}`
-        ).join("\n");
+        empresasGlobal = empresas;
+
+        lista.textContent = empresas.map((e, i) => {
+
+            const tipo = e.tags.shop || e.tags.amenity || e.tags.office || e.tags.tourism || "empresa";
+
+            const lat = e.lat || e.center?.lat;
+            const lon = e.lon || e.center?.lon;
+
+            if (lat && lon) {
+                L.marker([lat, lon])
+                    .addTo(mapa)
+                    .bindPopup(`<b>${e.tags.name}</b><br>${tipo}`);
+            }
+
+            return `${i+1}. ${e.tags.name} — ${tipo}`;
+
+        }).join("\n");
 
     } catch (erro) {
-        resultado.textContent = "Erro ao buscar empresas.";
+        lista.textContent = "Erro na busca.";
         console.error(erro);
     }
+}
+
+function exportarCSV() {
+
+    if (empresasGlobal.length === 0) {
+        alert("Busque empresas primeiro.");
+        return;
+    }
+
+    let csv = "Nome,Tipo\n";
+
+    empresasGlobal.forEach(e => {
+        const tipo = e.tags.shop || e.tags.amenity || e.tags.office || e.tags.tourism || "empresa";
+        csv += `"${e.tags.name}","${tipo}"\n`;
+    });
+
+    const blob = new Blob([csv], { type: "text/csv" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "empresas.csv";
+    link.click();
 }
 </script>
 
