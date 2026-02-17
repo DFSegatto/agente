@@ -55,7 +55,7 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapa);
 async function buscar() {
 
   const cidade = document.getElementById("cidade").value.trim();
-  const limite = document.getElementById("limite").value;
+  const limite = parseInt(document.getElementById("limite").value);
   const lista = document.getElementById("lista");
 
   if (!cidade){
@@ -77,110 +77,115 @@ async function buscar() {
   }
 
   const { lat, lon, boundingbox } = geoData[0];
-  const south = boundingbox[0];
-  const north = boundingbox[1];
-  const west = boundingbox[2];
-  const east = boundingbox[3];
 
-  lista.textContent = "Buscando empresas...";
+  let south = parseFloat(boundingbox[0]);
+  let north = parseFloat(boundingbox[1]);
+  let west = parseFloat(boundingbox[2]);
+  let east = parseFloat(boundingbox[3]);
 
-  // Montar consulta conforme filtros
-  let partes = [];
+  lista.textContent = "Buscando em quadrantes...";
 
-  if (shop.checked)
-    partes.push(`node["shop"](${south},${west},${north},${east});`);
+  // 🔥 dividir área em 4 partes
+  const midLat = (south + north) / 2;
+  const midLon = (west + east) / 2;
 
-  if (food.checked)
-    partes.push(`node["amenity"~"restaurant|cafe|fast_food|bar|pub"](${south},${west},${north},${east});`);
+  const areas = [
+    [south, west, midLat, midLon],
+    [south, midLon, midLat, east],
+    [midLat, west, north, midLon],
+    [midLat, midLon, north, east]
+  ];
 
-  if (office.checked)
-    partes.push(`node["office"](${south},${west},${north},${east});`);
+  let resultados = [];
 
-  if (hotel.checked)
-    partes.push(`node["tourism"="hotel"](${south},${west},${north},${east});`);
+  for (const a of areas) {
 
-  const query = `
-  [out:json][timeout:25];
-  (
-    ${partes.join("\n")}
-  );
-  out tags center ${limite};
-  `;
-
-  try {
-
-    const response = await fetch(
-      "https://overpass-api.de/api/interpreter",
-      { method:"POST", body:query }
+    const query = `
+    [out:json][timeout:25];
+    (
+      node["shop"](${a[0]},${a[1]},${a[2]},${a[3]});
+      node["amenity"~"restaurant|cafe|fast_food|bar|pub"](${a[0]},${a[1]},${a[2]},${a[3]});
+      node["office"](${a[0]},${a[1]},${a[2]},${a[3]});
+      node["tourism"="hotel"](${a[0]},${a[1]},${a[2]},${a[3]});
     );
+    out tags center ${Math.ceil(limite/4)};
+    `;
 
-    const data = await response.json();
+    try {
+      const resp = await fetch(
+        "https://overpass-api.de/api/interpreter",
+        { method:"POST", body:query }
+      );
 
-    // Aplicar filtros
-    const empresas = data.elements.filter(e => {
+      const data = await resp.json();
+      resultados = resultados.concat(data.elements);
 
-      if (!e.tags || !e.tags.name) return false;
-      const t = e.tags;
+    } catch(e){
+      console.log("Falha em um quadrante, continuando...");
+    }
+  }
 
-      if (semSite.checked && (t.website || t["contact:website"]))
-        return false;
+  // Aplicar filtros
+  const empresas = resultados.filter(e => {
 
-      if (comTelefone.checked && !(t.phone || t["contact:phone"]))
-        return false;
+    if (!e.tags || !e.tags.name) return false;
+    const t = e.tags;
 
-      if (comRede.checked &&
-         !(t["contact:instagram"] || t["contact:facebook"]))
-        return false;
+    if (semSite.checked && (t.website || t["contact:website"]))
+      return false;
 
-      return true;
-    });
+    if (comTelefone.checked && !(t.phone || t["contact:phone"]))
+      return false;
 
-    mapa.setView([lat, lon], 13);
+    if (comRede.checked &&
+       !(t["contact:instagram"] || t["contact:facebook"]))
+      return false;
 
-    mapa.eachLayer(l => {
-      if (l instanceof L.Marker) mapa.removeLayer(l);
-    });
+    return true;
 
-    if (empresas.length === 0){
-      lista.textContent = "Nenhum resultado encontrado.";
-      return;
+  }).slice(0, limite);
+
+  mapa.setView([lat, lon], 13);
+
+  mapa.eachLayer(l => {
+    if (l instanceof L.Marker) mapa.removeLayer(l);
+  });
+
+  if (empresas.length === 0){
+    lista.textContent = "Nenhum resultado encontrado.";
+    return;
+  }
+
+  empresasGlobal = empresas;
+
+  lista.textContent = empresas.map((e,i)=>{
+
+    const t = e.tags;
+    const tipo = t.shop || t.amenity || t.office || t.tourism || "empresa";
+    const telefone = t.phone || t["contact:phone"] || "";
+    const endereco =
+      (t["addr:street"] || "") + " " + (t["addr:housenumber"] || "");
+
+    const latE = e.lat || e.center?.lat;
+    const lonE = e.lon || e.center?.lon;
+
+    if (latE && lonE){
+      L.marker([latE, lonE])
+        .addTo(mapa)
+        .bindPopup(`<b>${t.name}</b><br>${tipo}<br>${telefone}`);
     }
 
-    empresasGlobal = empresas;
-
-    lista.textContent = empresas.map((e,i)=>{
-
-      const t = e.tags;
-      const tipo = t.shop || t.amenity || t.office || t.tourism || "empresa";
-      const telefone = t.phone || t["contact:phone"] || "";
-      const redes = t["contact:instagram"] || t["contact:facebook"] || "";
-      const endereco =
-        (t["addr:street"] || "") + " " + (t["addr:housenumber"] || "");
-
-      const latE = e.lat || e.center?.lat;
-      const lonE = e.lon || e.center?.lon;
-
-      if (latE && lonE){
-        L.marker([latE, lonE])
-          .addTo(mapa)
-          .bindPopup(`<b>${t.name}</b><br>${tipo}<br>${telefone}`);
-      }
-
-      return `
+    return `
 ${i+1}. ${t.name}
 Tipo: ${tipo}
 Telefone: ${telefone}
 Endereço: ${endereco}
-Redes: ${redes}
 `;
 
-    }).join("\n====================");
+  }).join("\n====================");
 
-  } catch (erro){
-    lista.textContent = "Erro na busca.";
-    console.error(erro);
-  }
 }
+
 
 function exportarCSV(){
 
