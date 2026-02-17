@@ -1,103 +1,85 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-br">
 <head>
-  <meta charset="UTF-8">
-  <title>SiteHunter Free</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<meta charset="UTF-8">
+<title>Buscar Empresas Privadas</title>
 </head>
-
 <body>
 
-<h2>Buscar até 20 empresas sem site</h2>
+<h2>Buscar 20 empresas privadas por cidade</h2>
 
-<input id="cidade" placeholder="Cidade">
-<input id="estado" placeholder="Estado">
+<input type="text" id="cidade" placeholder="Cidade (ex: Joaçaba)">
+<input type="text" id="estado" placeholder="Estado (SC ou Santa Catarina)">
 <button onclick="buscarEmpresas()">Buscar</button>
 
-<p id="status"></p>
-
-<h3>Resultados</h3>
-<ul id="lista"></ul>
+<pre id="resultado"></pre>
 
 <script>
-const SUPABASE_URL = "https://evefnjpjxqxydknyjutt.supabase.co"
-const SUPABASE_KEY = "sb_publishable_Ou4ChPNEA1mYc6ESE2UsEQ_EZZ4nyE7"
-
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
-
 async function buscarEmpresas() {
 
-  const cidade = document.getElementById("cidade").value
-  const estado = document.getElementById("estado").value
+    const cidade = document.getElementById("cidade").value.trim();
+    const estado = document.getElementById("estado").value.trim();
+    const resultado = document.getElementById("resultado");
 
-  document.getElementById("status").innerText = "Buscando empresas..."
-
-  const query = `
-  [out:json][timeout:25];
-  area["name"="${cidade}"]->.searchArea;
-  (
-    node["shop"](area.searchArea);
-    node["amenity"](area.searchArea);
-  );
-  out tags 20;
-  `;
-
-  try {
-
-    const res = await fetch("https://overpass.kumi.systems/api/interpreter", {
-      method: "POST",
-      body: query
-    });
-
-    if (!res.ok) {
-      document.getElementById("status").innerText =
-        "Servidor ocupado. Aguarde 1 minuto e tente novamente.";
-      return;
+    if (!cidade || !estado) {
+        alert("Digite cidade e estado");
+        return;
     }
 
-    const data = await res.json();
+    resultado.textContent = "Buscando empresas privadas...";
 
-    const semSite = data.elements.filter(e => !e.tags.website);
+    const area = `${cidade}, ${estado}, Brazil`;
 
-    const lista = document.getElementById("lista");
-    lista.innerHTML = "";
+    // 🔎 Consulta Overpass — apenas empresas privadas
+    const query = `
+    [out:json][timeout:25];
+    area["name"="${area}"]->.searchArea;
 
-    for (const e of semSite) {
+    (
+      node["shop"](area.searchArea);
+      node["amenity"~"restaurant|cafe|fast_food|pharmacy|clinic|hospital|school|college|university|bar|pub|cinema|theatre|marketplace"](area.searchArea);
+      node["office"](area.searchArea);
+      node["tourism"="hotel"](area.searchArea);
+    );
 
-      const lead = {
-        nome: e.tags.name || "Sem nome",
-        cidade: cidade,
-        estado: estado,
-        telefone: e.tags.phone || "",
-        endereco: e.tags["addr:street"] || "",
-        categoria: e.tags.shop || e.tags.amenity || "",
-        website: "",
-        status: "sem_site"
-      }
+    // ❌ Excluir bancos e órgãos públicos
+    foreach -> .a (
+      if (!t["amenity"] || t["amenity"] != "bank")
+      if (!t["office"] || t["office"] != "government")
+      if (!t["government"])
+      out tags;
+    );
+    `;
 
-      // salva no Supabase
-      await sb.from("leads").insert(lead)
+    try {
 
-      lista.innerHTML += `
-        <li>
-          <b>${lead.nome}</b><br>
-          📍 ${lead.endereco}<br>
-          ☎ ${lead.telefone}<br>
-          🏷 ${lead.categoria}
-        </li>
-      `
+        const response = await fetch(
+            "https://overpass-api.de/api/interpreter",
+            {
+                method: "POST",
+                body: query
+            }
+        );
+
+        const data = await response.json();
+
+        const empresas = data.elements
+            .filter(e => e.tags && e.tags.name)
+            .slice(0, 20);
+
+        if (empresas.length === 0) {
+            resultado.textContent = "Nenhuma empresa encontrada.";
+            return;
+        }
+
+        resultado.textContent = empresas.map(e =>
+            `${e.tags.name} — ${e.tags.shop || e.tags.amenity || e.tags.office || e.tags.tourism || "empresa"}`
+        ).join("\n");
+
+    } catch (erro) {
+        resultado.textContent = "Erro ao buscar empresas.";
+        console.error(erro);
     }
-
-    document.getElementById("status").innerText =
-      `Encontradas ${semSite.length} empresas sem site`
-
-  } catch (err) {
-
-    document.getElementById("status").innerText =
-      "Erro ao buscar. Tente novamente."
-
-    console.error(err)
-  }
 }
 </script>
 
