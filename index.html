@@ -34,33 +34,45 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapa);
 async function buscar() {
 
   const cidadeValor = document.getElementById("cidade").value.trim();
-  const estadoValor = document.getElementById("estado").value.trim();
-
-  const estado = normalizarEstado(estadoValor);
   const lista = document.getElementById("lista");
 
-  if (!cidadeValor || !estado){
-    alert("Digite cidade e estado");
+  if (!cidadeValor){
+    alert("Digite a cidade");
     return;
   }
 
-  lista.textContent = "Buscando empresas privadas...";
-  empresasGlobal = [];
+  lista.textContent = "Localizando cidade...";
 
-  const query = `
-  [out:json][timeout:25];
-
-  area["name"="Brasil"]->.br;
-  area["name"="${estado}"](area.br)->.estado;
-  area["name"="${cidadeValor}"](area.estado)->.cidade;
-
-  (
-    node["shop"](area.cidade);
-    node["amenity"~"restaurant|cafe|fast_food|pharmacy|clinic|bar|pub|school|college"](area.cidade);
-    node["office"](area.cidade);
-    node["tourism"="hotel"](area.cidade);
+  // 1️⃣ Geocodificar cidade
+  const geoResp = await fetch(
+    `https://nominatim.openstreetmap.org/search?city=${cidadeValor}&country=Brazil&format=json`
   );
 
+  const geoData = await geoResp.json();
+
+  if (geoData.length === 0){
+    lista.textContent = "Cidade não encontrada.";
+    return;
+  }
+
+  const { lat, lon, boundingbox } = geoData[0];
+
+  const south = boundingbox[0];
+  const north = boundingbox[1];
+  const west = boundingbox[2];
+  const east = boundingbox[3];
+
+  lista.textContent = "Buscando empresas privadas...";
+
+  // 2️⃣ Consulta leve por bounding box
+  const query = `
+  [out:json][timeout:25];
+  (
+    node["shop"](${south},${west},${north},${east});
+    node["amenity"~"restaurant|cafe|fast_food|pharmacy|clinic|bar|pub"](${south},${west},${north},${east});
+    node["office"](${south},${west},${north},${east});
+    node["tourism"="hotel"](${south},${west},${north},${east});
+  );
   out tags center 20;
   `;
 
@@ -76,6 +88,8 @@ async function buscar() {
     const empresas = data.elements
       .filter(e => e.tags && e.tags.name)
       .slice(0,20);
+
+    mapa.setView([lat, lon], 13);
 
     mapa.eachLayer(l => {
       if (l instanceof L.Marker) mapa.removeLayer(l);
@@ -97,11 +111,11 @@ async function buscar() {
         e.tags.tourism ||
         "empresa";
 
-      const lat = e.lat || e.center?.lat;
-      const lon = e.lon || e.center?.lon;
+      const latE = e.lat || e.center?.lat;
+      const lonE = e.lon || e.center?.lon;
 
-      if (lat && lon){
-        L.marker([lat, lon])
+      if (latE && lonE){
+        L.marker([latE, lonE])
           .addTo(mapa)
           .bindPopup(`<b>${e.tags.name}</b><br>${tipo}`);
       }
@@ -115,7 +129,6 @@ async function buscar() {
     console.error(erro);
   }
 }
-
 
 function exportarCSV() {
 
