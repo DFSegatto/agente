@@ -3,15 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <title>SiteHunter Free</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+
+  <!-- Biblioteca Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 
 <body>
+
 <h2>Buscar empresas sem site</h2>
 
 <input id="cidade" placeholder="Cidade">
 <input id="estado" placeholder="Estado">
-<button onclick="buscar()">Buscar</button>
+<button onclick="buscarEmpresas()">Buscar</button>
 
 <h3>Resultados</h3>
 <ul id="lista"></ul>
@@ -20,11 +23,13 @@
 const SUPABASE_URL = "https://evefnjpjxqxydknyjutt.supabase.co"
 const SUPABASE_KEY = "sb_publishable_Ou4ChPNEA1mYc6ESE2UsEQ_EZZ4nyE7"
 
-const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
+// nome diferente para não conflitar
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
 
-async function buscar() {
+async function buscarEmpresas() {
 
   const cidade = document.getElementById("cidade").value
+  const estado = document.getElementById("estado").value
 
   const query = `
   [out:json];
@@ -53,7 +58,7 @@ async function buscar() {
     const lead = {
       nome: e.tags.name || "",
       cidade: cidade,
-      estado: document.getElementById("estado").value,
+      estado: estado,
       telefone: e.tags.phone || "",
       endereco: e.tags["addr:street"] || "",
       categoria: e.tags.shop || e.tags.amenity || "",
@@ -61,7 +66,7 @@ async function buscar() {
       status: "sem_site"
     }
 
-    await supabase.from("leads").insert(lead)
+    await sb.from("leads").insert(lead)
 
     lista.innerHTML += `<li>${lead.nome} — ${lead.telefone}</li>`
   }
