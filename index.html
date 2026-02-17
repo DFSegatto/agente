@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-<title>Modo Caça-Clientes Extremo</title>
+<title>Agente Caça-Clientes PRO</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -10,16 +10,36 @@
 <style>
 body { font-family: Arial; margin: 20px; }
 #mapa { height: 420px; margin-top: 20px; }
+fieldset { margin-top: 10px; }
 button { margin: 5px; padding: 8px 12px; }
-input { padding: 8px; }
 </style>
 </head>
 <body>
 
-<h2>🚀 MODO CAÇA-CLIENTES EXTREMO</h2>
+<h2>🚀 Agente Caça-Clientes PRO</h2>
 
-<input id="cidade" placeholder="Digite a cidade">
-<button onclick="buscar()">Caçar Clientes</button>
+Cidade:
+<input id="cidade" placeholder="Ex: Joaçaba">
+
+Quantidade:
+<input id="limite" type="number" value="20" min="1" max="100">
+
+<fieldset>
+<legend>Tipos de empresa</legend>
+<label><input type="checkbox" id="shop" checked> Lojas</label>
+<label><input type="checkbox" id="food" checked> Restaurantes</label>
+<label><input type="checkbox" id="office" checked> Escritórios</label>
+<label><input type="checkbox" id="hotel" checked> Hotéis</label>
+</fieldset>
+
+<fieldset>
+<legend>Filtros de leads</legend>
+<label><input type="checkbox" id="semSite" checked> Apenas sem site</label>
+<label><input type="checkbox" id="comTelefone" checked> Exigir telefone</label>
+<label><input type="checkbox" id="comRede"> Exigir redes sociais</label>
+</fieldset>
+
+<button onclick="buscar()">Buscar</button>
 <button onclick="exportarCSV()">Exportar Leads</button>
 
 <pre id="lista"></pre>
@@ -34,21 +54,21 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapa);
 
 async function buscar() {
 
-  const cidadeValor = document.getElementById("cidade").value.trim();
+  const cidade = document.getElementById("cidade").value.trim();
+  const limite = document.getElementById("limite").value;
   const lista = document.getElementById("lista");
 
-  if (!cidadeValor){
+  if (!cidade){
     alert("Digite a cidade");
     return;
   }
 
   lista.textContent = "Localizando cidade...";
 
-  // Geocodificação da cidade
+  // Geocodificação
   const geoResp = await fetch(
-    `https://nominatim.openstreetmap.org/search?city=${cidadeValor}&country=Brazil&format=json`
+    `https://nominatim.openstreetmap.org/search?city=${cidade}&country=Brazil&format=json`
   );
-
   const geoData = await geoResp.json();
 
   if (geoData.length === 0){
@@ -57,23 +77,34 @@ async function buscar() {
   }
 
   const { lat, lon, boundingbox } = geoData[0];
-
   const south = boundingbox[0];
   const north = boundingbox[1];
   const west = boundingbox[2];
   const east = boundingbox[3];
 
-  lista.textContent = "Caçando clientes quentes...";
+  lista.textContent = "Buscando empresas...";
+
+  // Montar consulta conforme filtros
+  let partes = [];
+
+  if (shop.checked)
+    partes.push(`node["shop"](${south},${west},${north},${east});`);
+
+  if (food.checked)
+    partes.push(`node["amenity"~"restaurant|cafe|fast_food|bar|pub"](${south},${west},${north},${east});`);
+
+  if (office.checked)
+    partes.push(`node["office"](${south},${west},${north},${east});`);
+
+  if (hotel.checked)
+    partes.push(`node["tourism"="hotel"](${south},${west},${north},${east});`);
 
   const query = `
   [out:json][timeout:25];
   (
-    node["shop"](${south},${west},${north},${east});
-    node["amenity"~"restaurant|cafe|fast_food|pharmacy|clinic|bar|pub"](${south},${west},${north},${east});
-    node["office"](${south},${west},${north},${east});
-    node["tourism"="hotel"](${south},${west},${north},${east});
+    ${partes.join("\n")}
   );
-  out tags center 80;
+  out tags center ${limite};
   `;
 
   try {
@@ -85,20 +116,24 @@ async function buscar() {
 
     const data = await response.json();
 
-    // 🔥 FILTRO EXTREMO
-    const empresas = data.elements
-      .filter(e => {
-        if (!e.tags || !e.tags.name) return false;
+    // Aplicar filtros
+    const empresas = data.elements.filter(e => {
 
-        const t = e.tags;
+      if (!e.tags || !e.tags.name) return false;
+      const t = e.tags;
 
-        const semSite = !t.website && !t["contact:website"];
-        const temTelefone = t.phone || t["contact:phone"];
-        const temRede = t["contact:instagram"] || t["contact:facebook"];
+      if (semSite.checked && (t.website || t["contact:website"]))
+        return false;
 
-        return semSite && temTelefone && temRede;
-      })
-      .slice(0,20);
+      if (comTelefone.checked && !(t.phone || t["contact:phone"]))
+        return false;
+
+      if (comRede.checked &&
+         !(t["contact:instagram"] || t["contact:facebook"]))
+        return false;
+
+      return true;
+    });
 
     mapa.setView([lat, lon], 13);
 
@@ -107,7 +142,7 @@ async function buscar() {
     });
 
     if (empresas.length === 0){
-      lista.textContent = "Nenhum cliente encontrado.";
+      lista.textContent = "Nenhum resultado encontrado.";
       return;
     }
 
@@ -116,10 +151,9 @@ async function buscar() {
     lista.textContent = empresas.map((e,i)=>{
 
       const t = e.tags;
-
       const tipo = t.shop || t.amenity || t.office || t.tourism || "empresa";
-      const telefone = t.phone || t["contact:phone"];
-      const redes = t["contact:instagram"] || t["contact:facebook"];
+      const telefone = t.phone || t["contact:phone"] || "";
+      const redes = t["contact:instagram"] || t["contact:facebook"] || "";
       const endereco =
         (t["addr:street"] || "") + " " + (t["addr:housenumber"] || "");
 
@@ -129,26 +163,18 @@ async function buscar() {
       if (latE && lonE){
         L.marker([latE, lonE])
           .addTo(mapa)
-          .bindPopup(`
-            <b>${t.name}</b><br>
-            ${tipo}<br>
-            📞 ${telefone}<br>
-            📍 ${endereco}<br>
-            ❌ SEM SITE
-          `);
+          .bindPopup(`<b>${t.name}</b><br>${tipo}<br>${telefone}`);
       }
 
       return `
-🔥 CLIENTE QUENTE ${i+1}
-${t.name}
+${i+1}. ${t.name}
 Tipo: ${tipo}
 Telefone: ${telefone}
 Endereço: ${endereco}
 Redes: ${redes}
-❌ NÃO POSSUI SITE
 `;
 
-    }).join("\n=====================");
+    }).join("\n====================");
 
   } catch (erro){
     lista.textContent = "Erro na busca.";
@@ -168,7 +194,7 @@ function exportarCSV(){
   empresasGlobal.forEach(e=>{
     const t = e.tags;
 
-    const tipo = t.shop || t.amenity || t.office || t.tourism || "empresa";
+    const tipo = t.shop || t.amenity || t.office || t.tourism || "";
     const telefone = t.phone || t["contact:phone"] || "";
     const redes = t["contact:instagram"] || t["contact:facebook"] || "";
     const endereco =
@@ -180,7 +206,7 @@ function exportarCSV(){
   const blob = new Blob([csv], { type:"text/csv" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = "leads_extremos.csv";
+  link.download = "leads.csv";
   link.click();
 }
 
