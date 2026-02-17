@@ -2,216 +2,141 @@
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
-<style>
-body { font-family: Arial; margin: 20px; }
-#mapa { height: 420px; margin-top: 20px; }
-fieldset { margin-top: 10px; }
-button { margin: 5px; padding: 8px 12px; }
-</style>
+<title>AGENTE CAÇA CLIENTES EXTREMO</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
 </head>
+
 <body>
 
-Cidade:
-<input id="cidade" placeholder="Ex: Joaçaba">
+Estado: <input id="estado" placeholder="SC ou Santa Catarina"><br><br>
+Cidade: <input id="cidade" placeholder="Ex: Joaçaba"><br><br>
 
-Quantidade:
-<input id="limite" type="number" value="20" min="1" max="100">
+<button onclick="buscar()">CAÇAR EMPRESAS</button>
 
-<fieldset>
-<legend>Tipos de empresa</legend>
-<label><input type="checkbox" id="shop" checked> Lojas</label>
-<label><input type="checkbox" id="food" checked> Restaurantes</label>
-<label><input type="checkbox" id="office" checked> Escritórios</label>
-<label><input type="checkbox" id="hotel" checked> Hotéis</label>
-</fieldset>
-
-<fieldset>
-<legend>Filtros de leads</legend>
-<label><input type="checkbox" id="semSite" checked> Apenas sem site</label>
-<label><input type="checkbox" id="comTelefone" checked> Exigir telefone</label>
-<label><input type="checkbox" id="comRede"> Exigir redes sociais</label>
-</fieldset>
-
-<button onclick="buscar()">Buscar</button>
-<button onclick="exportarCSV()">Exportar Leads</button>
-
-<pre id="lista"></pre>
-<div id="mapa"></div>
+<pre id="resultado"></pre>
 
 <script>
-
-let empresasGlobal = [];
-
-let mapa = L.map('mapa').setView([-27, -51], 7);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapa);
+const supabaseUrl = "https://SEU_PROJETO.supabase.co";
+const supabaseKey = "SUA_CHAVE_PUBLICA";
+const db = supabase.createClient(supabaseUrl, supabaseKey);
 
 async function buscar() {
 
-  const cidade = document.getElementById("cidade").value.trim();
-  const limite = parseInt(document.getElementById("limite").value);
-  const lista = document.getElementById("lista");
+const estado = document.getElementById("estado").value.trim();
+const cidade = document.getElementById("cidade").value.trim();
 
-  if (!cidade){
-    alert("Digite a cidade");
-    return;
-  }
+document.getElementById("resultado").textContent = "CAÇANDO EMPRESAS...";
 
-  lista.textContent = "Localizando cidade...";
-
-  // Geocodificação
-  const geoResp = await fetch(
-    `https://nominatim.openstreetmap.org/search?city=${cidade}&country=Brazil&format=json`
-  );
-  const geoData = await geoResp.json();
-
-  if (geoData.length === 0){
-    lista.textContent = "Cidade não encontrada.";
-    return;
-  }
-
-  const { lat, lon, boundingbox } = geoData[0];
-
-  let south = parseFloat(boundingbox[0]);
-  let north = parseFloat(boundingbox[1]);
-  let west = parseFloat(boundingbox[2]);
-  let east = parseFloat(boundingbox[3]);
-
-  lista.textContent = "Buscando em quadrantes...";
-
-  // 🔥 dividir área em 4 partes
-  const midLat = (south + north) / 2;
-  const midLon = (west + east) / 2;
-
-  const areas = [
-    [south, west, midLat, midLon],
-    [south, midLon, midLat, east],
-    [midLat, west, north, midLon],
-    [midLat, midLon, north, east]
-  ];
-
-  let resultados = [];
-
-  for (const a of areas) {
-
-    const query = `
-    [out:json][timeout:25];
-    (
-      node["shop"](${a[0]},${a[1]},${a[2]},${a[3]});
-      node["amenity"~"restaurant|cafe|fast_food|bar|pub"](${a[0]},${a[1]},${a[2]},${a[3]});
-      node["office"](${a[0]},${a[1]},${a[2]},${a[3]});
-      node["tourism"="hotel"](${a[0]},${a[1]},${a[2]},${a[3]});
-    );
-    out tags center ${Math.ceil(limite/4)};
-    `;
-
-    try {
-      const resp = await fetch(
-        "https://overpass-api.de/api/interpreter",
-        { method:"POST", body:query }
-      );
-
-      const data = await resp.json();
-      resultados = resultados.concat(data.elements);
-
-    } catch(e){
-      console.log("Falha em um quadrante, continuando...");
-    }
-  }
-
-  // Aplicar filtros
-  const empresas = resultados.filter(e => {
-
-    if (!e.tags || !e.tags.name) return false;
-    const t = e.tags;
-
-    if (semSite.checked && (t.website || t["contact:website"]))
-      return false;
-
-    if (comTelefone.checked && !(t.phone || t["contact:phone"]))
-      return false;
-
-    if (comRede.checked &&
-       !(t["contact:instagram"] || t["contact:facebook"]))
-      return false;
-
-    return true;
-
-  }).slice(0, limite);
-
-  mapa.setView([lat, lon], 13);
-
-  mapa.eachLayer(l => {
-    if (l instanceof L.Marker) mapa.removeLayer(l);
-  });
-
-  if (empresas.length === 0){
-    lista.textContent = "Nenhum resultado encontrado.";
-    return;
-  }
-
-  empresasGlobal = empresas;
-
-  lista.textContent = empresas.map((e,i)=>{
-
-    const t = e.tags;
-    const tipo = t.shop || t.amenity || t.office || t.tourism || "empresa";
-    const telefone = t.phone || t["contact:phone"] || "";
-    const endereco =
-      (t["addr:street"] || "") + " " + (t["addr:housenumber"] || "");
-
-    const latE = e.lat || e.center?.lat;
-    const lonE = e.lon || e.center?.lon;
-
-    if (latE && lonE){
-      L.marker([latE, lonE])
-        .addTo(mapa)
-        .bindPopup(`<b>${t.name}</b><br>${tipo}<br>${telefone}`);
-    }
-
-    return `
-${i+1}. ${t.name}
-Tipo: ${tipo}
-Telefone: ${telefone}
-Endereço: ${endereco}
+const areaQuery = `
+[out:json][timeout:25];
+area["name"="${cidade}"]["is_in:state"="${estado}"]->.searchArea;
+out ids;
 `;
 
-  }).join("\n====================");
+const areaRes = await fetch("https://overpass-api.de/api/interpreter", {
+method:"POST",
+body: areaQuery
+});
+
+const areaData = await areaRes.json();
+const areaId = areaData.elements[0].id + 3600000000;
+
+let empresas = [];
+
+const filtros = `
+["shop"]
+["amenity"~"restaurant|cafe|bar|clinic|pharmacy|dentist|school|hospital|fuel"]
+`;
+
+const exclusoes = `
+["amenity"!~"bank|atm|police|townhall|courthouse|school|university"]
+["office"!~"government"]
+`;
+
+const quadrantes = [
+"",
+"(._;>;);",
+"(._;<<;);",
+"(._;>;<<;);"
+];
+
+for (let i=0;i<quadrantes.length;i++){
+
+try{
+
+const query = `
+[out:json][timeout:25];
+area(${areaId})->.searchArea;
+(
+node${filtros}${exclusoes}(area.searchArea);
+way${filtros}${exclusoes}(area.searchArea);
+relation${filtros}${exclusoes}(area.searchArea);
+);
+out tags center ${quadrantes[i]};
+`;
+
+const res = await fetch("https://overpass-api.de/api/interpreter", {
+method:"POST",
+body: query
+});
+
+const data = await res.json();
+
+empresas.push(...data.elements);
+
+await new Promise(r => setTimeout(r, 2000));
+
+}catch(e){
+console.log("Falha em um quadrante, continuando...");
+}
 
 }
 
+const filtradas = empresas.filter(e =>
+e.tags &&
+e.tags.name &&
+!e.tags.website &&
+!e.tags["contact:website"] &&
+!e.tags.brand &&
+!e.tags.operator &&
+(
+e.tags.phone ||
+e.tags["contact:phone"] ||
+e.tags.email ||
+e.tags["contact:email"]
+)
+).slice(0,20);
 
-function exportarCSV(){
+let texto = "";
 
-  if (empresasGlobal.length === 0){
-    alert("Nenhum lead para exportar.");
-    return;
-  }
+for (const e of filtradas){
 
-  let csv = "Nome,Tipo,Telefone,Endereco,Redes\n";
+const nome = e.tags.name || "Sem nome";
+const telefone = e.tags.phone || e.tags["contact:phone"] || "Sem telefone";
+const email = e.tags.email || e.tags["contact:email"] || "Sem email";
+const tipo = e.tags.shop || e.tags.amenity || "Empresa";
 
-  empresasGlobal.forEach(e=>{
-    const t = e.tags;
+texto += `${nome} (${tipo})
+Telefone: ${telefone}
+Email: ${email}
 
-    const tipo = t.shop || t.amenity || t.office || t.tourism || "";
-    const telefone = t.phone || t["contact:phone"] || "";
-    const redes = t["contact:instagram"] || t["contact:facebook"] || "";
-    const endereco =
-      (t["addr:street"] || "") + " " + (t["addr:housenumber"] || "");
+`;
 
-    csv += `"${t.name}","${tipo}","${telefone}","${endereco}","${redes}"\n`;
-  });
+await db.from("empresas").insert({
+nome,
+telefone,
+email,
+tipo,
+cidade,
+estado
+});
 
-  const blob = new Blob([csv], { type:"text/csv" });
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = "leads.csv";
-  link.click();
 }
 
+document.getElementById("resultado").textContent =
+texto || "Nenhuma empresa encontrada";
+
+}
 </script>
 
 </body>
