@@ -1,36 +1,3 @@
-<!DOCTYPE html>
-<html lang="pt-br">
-<head>
-<meta charset="UTF-8">
-<title>Buscador PRO de Empresas</title>
-
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
-<style>
-body { font-family: Arial; margin: 20px; }
-#mapa { height: 400px; margin-top: 20px; }
-button { margin: 5px; }
-</style>
-</head>
-<body>
-
-<h2>🔎 Buscador PRO de Empresas Privadas</h2>
-
-<input id="cidade" placeholder="Cidade">
-<input id="estado" placeholder="Estado (SC ou Santa Catarina)">
-<button onclick="buscar()">Buscar</button>
-<button onclick="exportarCSV()">Exportar Excel</button>
-
-<pre id="lista"></pre>
-<div id="mapa"></div>
-
-<script>
-let empresasGlobal = [];
-let mapa = L.map('mapa').setView([-27, -51], 7);
-
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapa);
-
 async function buscar() {
 
   const cidadeValor = document.getElementById("cidade").value.trim();
@@ -43,7 +10,7 @@ async function buscar() {
 
   lista.textContent = "Localizando cidade...";
 
-  // 1️⃣ Geocodificar cidade
+  // Geocodificar cidade
   const geoResp = await fetch(
     `https://nominatim.openstreetmap.org/search?city=${cidadeValor}&country=Brazil&format=json`
   );
@@ -62,9 +29,8 @@ async function buscar() {
   const west = boundingbox[2];
   const east = boundingbox[3];
 
-  lista.textContent = "Buscando empresas privadas...";
+  lista.textContent = "Caçando clientes EXTREMOS...";
 
-  // 2️⃣ Consulta leve por bounding box
   const query = `
   [out:json][timeout:25];
   (
@@ -73,7 +39,7 @@ async function buscar() {
     node["office"](${south},${west},${north},${east});
     node["tourism"="hotel"](${south},${west},${north},${east});
   );
-  out tags center 20;
+  out tags center 80;
   `;
 
   try {
@@ -85,8 +51,19 @@ async function buscar() {
 
     const data = await response.json();
 
+    // 🔥 FILTRO EXTREMO
     const empresas = data.elements
-      .filter(e => e.tags && e.tags.name)
+      .filter(e => {
+        if (!e.tags || !e.tags.name) return false;
+
+        const t = e.tags;
+
+        const semSite = !t.website && !t["contact:website"];
+        const temTelefone = t.phone || t["contact:phone"];
+        const temRede = t["contact:instagram"] || t["contact:facebook"];
+
+        return semSite && temTelefone && temRede;
+      })
       .slice(0,20);
 
     mapa.setView([lat, lon], 13);
@@ -96,7 +73,7 @@ async function buscar() {
     });
 
     if (empresas.length === 0){
-      lista.textContent = "Nenhuma empresa encontrada.";
+      lista.textContent = "Nenhum cliente extremo encontrado.";
       return;
     }
 
@@ -104,12 +81,22 @@ async function buscar() {
 
     lista.textContent = empresas.map((e,i)=>{
 
-      const tipo =
-        e.tags.shop ||
-        e.tags.amenity ||
-        e.tags.office ||
-        e.tags.tourism ||
-        "empresa";
+      const t = e.tags;
+
+      const tipo = t.shop || t.amenity || t.office || t.tourism || "empresa";
+
+      const telefone =
+        t.phone ||
+        t["contact:phone"] ||
+        "Não informado";
+
+      const redes =
+        t["contact:instagram"] ||
+        t["contact:facebook"] ||
+        "Sem redes";
+
+      const endereco =
+        (t["addr:street"] || "") + " " + (t["addr:housenumber"] || "");
 
       const latE = e.lat || e.center?.lat;
       const lonE = e.lon || e.center?.lon;
@@ -117,40 +104,29 @@ async function buscar() {
       if (latE && lonE){
         L.marker([latE, lonE])
           .addTo(mapa)
-          .bindPopup(`<b>${e.tags.name}</b><br>${tipo}`);
+          .bindPopup(`
+            <b>${t.name}</b><br>
+            ${tipo}<br>
+            📞 ${telefone}<br>
+            📍 ${endereco}<br>
+            ❌ SEM SITE
+          `);
       }
 
-      return `${i+1}. ${e.tags.name} — ${tipo}`;
+      return `
+🔥 CLIENTE QUENTE ${i+1}
+${t.name}
+Tipo: ${tipo}
+Telefone: ${telefone}
+Endereço: ${endereco}
+Redes: ${redes}
+❌ NÃO POSSUI SITE
+`;
 
-    }).join("\n");
+    }).join("\n======================");
 
   } catch (erro){
     lista.textContent = "Erro na busca.";
     console.error(erro);
   }
 }
-
-function exportarCSV() {
-
-    if (empresasGlobal.length === 0) {
-        alert("Busque empresas primeiro.");
-        return;
-    }
-
-    let csv = "Nome,Tipo\n";
-
-    empresasGlobal.forEach(e => {
-        const tipo = e.tags.shop || e.tags.amenity || e.tags.office || e.tags.tourism || "empresa";
-        csv += `"${e.tags.name}","${tipo}"\n`;
-    });
-
-    const blob = new Blob([csv], { type: "text/csv" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = "empresas.csv";
-    link.click();
-}
-</script>
-
-</body>
-</html>
